@@ -9,6 +9,7 @@ requests
 tgcrypto
 olefile
 motor
+dotenv
 pymongo
 dnspython
 psutil
