@@ -1,14 +1,13 @@
 # MIT License
 
 import os
-import time
 import logging
 import asyncio
 import ntplib
 from pyrogram import Client, idle
 from config import Config
 
-# Configuración de logs
+# -------------------- Configuración de logs --------------------
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -16,31 +15,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 
-# -------------------- Sincronización de hora con Google NTP --------------------
-async def sync_time_google_loop(interval: int = 3600):
+# -------------------- Función de sincronización de hora --------------------
+async def sync_time_google():
     """
-    Sincroniza la hora con Google NTP periódicamente.
-    interval: cada cuántos segundos se realiza la sincronización.
+    Sincroniza la hora del cliente con Google NTP.
+    Retorna True si la sincronización fue exitosa.
     """
-    client = ntplib.NTPClient()
-    while True:
-        try:
-            response = client.request('time.google.com')
-            offset = response.offset
-            if abs(offset) > 0.1:  # Solo ajustamos si el desfase > 0.1s
-                logger.info(f"[SYNC] Hora sincronizada con Google NTP, offset: {offset:.3f}s")
-                # Ajuste de tiempo interno del bot (solo para control, no cambia el sistema)
-                await asyncio.sleep(offset)
-            else:
-                logger.info("[SYNC] Hora local ya está sincronizada")
-        except Exception as e:
-            logger.warning(f"[SYNC] No se pudo sincronizar la hora: {e}")
-        await asyncio.sleep(interval)  # Espera hasta la siguiente sincronización
+    try:
+        client = ntplib.NTPClient()
+        response = client.request('time.google.com')
+        offset = response.offset
+        if abs(offset) > 0.1:  # Ajuste solo si hay desfase significativo
+            logger.info(f"[SYNC] Hora sincronizada con Google NTP, offset: {offset:.3f}s")
+            await asyncio.sleep(offset)  # Ajuste interno del bot
+        return True
+    except Exception as e:
+        logger.warning(f"[SYNC] No se pudo sincronizar la hora: {e}")
+        return False
 
-# ------------------------------------------------------------------
-
-async def main():
-    # Creamos la carpeta de descargas si no existe
+# -------------------- Función para iniciar el bot --------------------
+async def start_bot():
+    # Crear carpeta de descargas si no existe
     if not os.path.isdir(Config.DOWNLOAD_LOCATION):
         os.makedirs(Config.DOWNLOAD_LOCATION)
 
@@ -53,17 +48,29 @@ async def main():
         plugins=plugins
     )
 
+    logger.info("Bot Starting...")
+
+    # Sincronizamos la hora antes de iniciar Pyrogram
+    await sync_time_google()
+
+    await Uploadbot.start()
     logger.info("Bot Started :)")
 
-    # Iniciamos el bot y el loop de sincronización en paralelo
+    # Loop que sincroniza la hora antes de cada acción crítica (cada 30 min)
+    async def periodic_sync():
+        while True:
+            await asyncio.sleep(1800)  # Cada 30 minutos
+            await sync_time_google()
+
+    # Ejecutamos el loop de sincronización en paralelo con idle()
     await asyncio.gather(
-        Uploadbot.start(),
-        sync_time_google_loop(interval=3600)  # Sincroniza cada hora
+        periodic_sync(),
+        idle()
     )
 
-    await idle()
     await Uploadbot.stop()
     logger.info("Bot Stopped ;)")
 
+# -------------------- Entrada principal --------------------
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(start_bot())
